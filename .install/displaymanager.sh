@@ -181,10 +181,10 @@ install_amy_sddm_theme() {
 # SDDM Configuration Functions
 # ------------------------------------------------------
 configure_sddm() {
-    # Create SDDM configuration directory
+    # Crear directorio de configuración
     sudo mkdir -p /etc/sddm.conf.d
 
-    # Main SDDM configuration
+    # Configuración principal de SDDM
     local sddm_conf="/etc/sddm.conf.d/bspwm.conf"
     echo "[Theme]
 Current=Amy-SDDM
@@ -192,129 +192,118 @@ ThemeDir=/usr/share/sddm/themes
 
 [General]
 Numlock=on
-InputMethod=fcitx
-DisplayServer=wayland
-WaylandDisplayServer=/usr/bin/Hyprland
+InputMethod=
+DisplayServer=x11
+ServerPath=/usr/bin/X
+ServerArguments=-nolisten tcp -dpi 96
 
 [Users]
 MaximumUid=60000
 MinimumUid=1000
 RememberLastUser=true
 RememberLastSession=true
-HideUsers=
 
 [X11]
 EnableHiDPI=true
-ServerArguments=-nolisten tcp -dpi 192
+ServerArguments=-nolisten tcp" | sudo tee "$sddm_conf" > /dev/null
 
-[Wayland]
-EnableHiDPI=true" | sudo tee "$sddm_conf" > /dev/null
+    # Configuración principal de SDDM
+    local main_conf="/etc/sddm.conf"
+    echo "[General]
+Numlock=on
+InputMethod=
+DisplayServer=x11
 
-    # Theme-specific configuration
+[Theme]
+Current=Amy-SDDM
+
+[Users]
+MaximumUid=60000
+MinimumUid=1000
+RememberLastUser=true
+RememberLastSession=true" | sudo tee "$main_conf" > /dev/null
+
+    # Tema específico
     local theme_conf="/usr/share/sddm/themes/Amy-SDDM/theme.conf"
     echo "[General]
 background=Background.jpg
 type=image
 color=#1a1b26
-fontSize=12
-fontFamily=JetBrains Mono Nerd Font
-loginButtonText=Login
-loginButtonIcon=system-shutdown
-loginButtonIconSize=48
-
-# Visual Effects
+fontSize=10
 blur=true
-recursiveBlurLoops=5
-recursiveBlurRadius=15
-recursiveBlurType=gaussian
-backgroundBlur=true
-backgroundBlurRadius=50
+recursiveBlurLoops=3
+recursiveBlurRadius=10
+font=JetBrains Mono Nerd Font
 
-# Color Scheme (Tokyo Night inspired)
-primaryColor=#7aa2f7
-secondaryColor=#bb9af7
-accentColor=#9ece6a
-textColor=#c0caf5
-backgroundColor=#1a1b26
-shadowColor=#414868
-
-# Layout Customization
 [Layout]
 clockVisible=true
-clockFormat=%I:%M %p
-dateVisible=true
-dateFormat=%A, %B %d
 showLoginButton=true
-loginButtonPosition=center
 
-# User Card Styling
-[UserCard]
-showFullName=true
-nameTextColor=#c0caf5
-avatarSize=128
-avatarBorderWidth=3
-avatarBorderColor=#7aa2f7
-
-# Power Options
-[PowerOptions]
-showSuspend=true
-showRestart=true
-showShutdown=true
-powerIconSize=32
-powerButtonStyle=round
-
-# Translations and Text
 [Translations]
-welcome=Welcome to BSPWM
-welcomeStyle=elegant
-loginButtonTooltip=Login to your session
-suspendTooltip=Suspend the system
-restartTooltip=Restart the system
-shutdownTooltip=Shutdown the system" | sudo tee "$theme_conf" > /dev/null
+welcome=Welcome to BSPWM" | sudo tee "$theme_conf" > /dev/null
 
-    log_success "SDDM configuration completed with enhanced visual styling"
+    log_success "SDDM configuration completed"
 }
 
-set_default_wallpaper() {
-    local wallpaper_src=".install/wallpapers/default.jpg"
-    local wallpaper_dest="/usr/share/sddm/themes/Amy-SDDM/Background.jpg"
-
-    if [[ -f "$wallpaper_src" ]]; then
-        sudo cp "$wallpaper_src" "$wallpaper_dest"
-        log_success "Custom wallpaper set for SDDM"
-    else
-        log_warning "No default wallpaper found"
-    fi
-}
-
-# ------------------------------------------------------
-# Display Manager Configuration
-# ------------------------------------------------------
 configure_display_manager() {
-    # Detect and disable current display manager
-    local current_dm=""
+    # Detener y deshabilitar display managers existentes
+    local display_managers=(
+        "gdm"
+        "lightdm"
+        "lxdm"
+        "mdm"
+    )
+
+    for dm in "${display_managers[@]}"; do
+        if systemctl is-active "$dm" &>/dev/null; then
+            log_warning "Stopping $dm display manager"
+            sudo systemctl stop "$dm.service" || true
+        fi
+        
+        if systemctl is-enabled "$dm" &>/dev/null; then
+            log_warning "Disabling $dm display manager"
+            sudo systemctl disable "$dm.service" || true
+        fi
+    done
+
+    # Configuración de SDDM
+    sudo systemctl stop sddm.service 2>/dev/null || true
+    sudo systemctl disable sddm.service 2>/dev/null || true
     
-    # Try multiple methods to detect current display manager
-    if [ -L /etc/systemd/system/display-manager.service ]; then
-        current_dm=$(basename "$(readlink /etc/systemd/system/display-manager.service)" .service)
-    elif command -v loginctl &> /dev/null; then
-        current_dm=$(loginctl show-session "$XDG_SESSION_ID" 2>/dev/null | awk -F= '/Service/ {print $2}' | cut -d. -f1)
-    fi
+    # Recargar systemd
+    sudo systemctl daemon-reload
 
-    # Disable current display manager if found
-    if [[ -n "$current_dm" && "$current_dm" != "sddm" ]]; then
-        log_warning "Detected current display manager: $current_dm"
-        sudo systemctl disable "$current_dm.service" || true
-        log_success "Disabled $current_dm display manager"
-    fi
-
-    # Enable SDDM
+    # Habilitar y iniciar SDDM
     sudo systemctl enable sddm.service || {
-        log_error "Failed to enable SDDM"
-        exit 1
+        log_error "Failed to enable SDDM service"
+        return 1
+    }
+
+    sudo systemctl start sddm.service || {
+        log_error "Failed to start SDDM service"
+        return 1
     }
 
     log_success "Display manager configured successfully"
+}
+
+diagnose_display_manager() {
+    log_info "Diagnosing SDDM and Display Manager configuration..."
+    
+    # Verificar estado de SDDM
+    echo "SDDM Service Status:"
+    systemctl status sddm.service || true
+
+    # Verificar configuraciones
+    echo -e "\nSDDM Configurations:"
+    echo "Main Configuration:"
+    cat /etc/sddm.conf 2>/dev/null || echo "No main configuration found"
+    
+    echo -e "\nTheme Configuration:"
+    cat /etc/sddm.conf.d/bspwm.conf 2>/dev/null || echo "No theme configuration found"
+    
+    echo -e "\nAvailable Display Managers:"
+    ls /usr/lib/systemd/system/*display-manager.service 2>/dev/null || echo "No display managers found"
 }
 
 # ------------------------------------------------------
@@ -329,7 +318,6 @@ main() {
         install_sddm_packages
         install_amy_sddm_theme
         configure_sddm
-        set_default_wallpaper
         configure_display_manager
 
         log_success "SDDM and Amy Theme installation completed!"
